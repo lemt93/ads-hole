@@ -1,0 +1,7 @@
+{
+  "name": "ads-hole",
+  "version": "1.0.0",
+  "description": "Ads blocking by resolving ads domain name to loopback interface",
+  "main": "index.mjs",
+  "license": "MIT"
+}
