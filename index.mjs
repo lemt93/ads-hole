@@ -1,58 +1,5 @@
 import { createSocket } from 'dgram'
 import fs from 'fs'
-import { performance } from 'perf_hooks'
-
-const Forwarder = {
-  _socket: undefined,
-  init() {
-    if (!this._socket) {
-      this._socket = createSocket('udp4')
-      this._socket.setMaxListeners(Infinity)
-    }
-
-    return this
-  },
-  send(buf) {
-    const start = performance.now()
-    // const socket = createSocket('udp4')
-    // socket.send(buf, 53, '8.8.8.8', () => {
-    //   console.log('Request sent to upstream')
-    //   console.log(performance.now() - start)
-    // })
-
-    // return new Promise((resolve, reject) => {
-    //   socket.on('message', (buf) => {
-    //     resolve(buf)
-    //     socket.close()
-    //   })
-    // })
-
-    this._socket.send(buf, 53, '8.8.8.8', () => {
-      console.log('Request sent to upstream')
-      console.log(performance.now() - start)
-    })
-
-    // return new Promise((resolve, reject) => {
-    //   const handleMessage = (msg, remoteInfo) => {
-    //     removeListeners()
-    //     resolve(msg)
-    //   }
-    //
-    //   const handleError = error => {
-    //     removeListeners()
-    //     reject(error)
-    //   }
-    //
-    //   const removeListeners = () => {
-    //     this._socket.removeListener('message', handleMessage)
-    //     this._socket.removeListener('error', handleError)
-    //   }
-    //
-    //   this._socket.on('message', handleMessage)
-    //   this._socket.on('error', handleError)
-    // })
-  }
-}
 
 const dnsProxyServer = {
   _socket: undefined,
@@ -62,7 +9,7 @@ const dnsProxyServer = {
   // Support exact match first
   // TODO: support pattern matching
   isDomainBlackListed(name = '') {
-    return this._blacklist.includes(name)
+    return this._blacklist.has(name)
   },
   getQuestionDomain(buffer) {
     // First 12 bytes is DNS header
@@ -142,60 +89,41 @@ const dnsProxyServer = {
     ])
   },
 
-  async handleDnsRequest(msg, rinfo) {
-    const socket = this._socket
-
-    try {
-      const { name, endOffset: questionSectionEndOffset } = this.getQuestionDomain(msg)
-      if (this.isDomainBlackListed(name)) {
-        socket.send(this.generateResponse(msg, { questionSectionEndOffset }), rinfo.port, rinfo.address)
-      } else {
-        // const responseBuf = await this._forwarder.send(msg)
-        // socket.send(responseBuf, rinfo.port, rinfo.address)
-
-        this._forwarder._socket.once('message', (upstreamRes) => {
-          socket.send(upstreamRes, rinfo.port, rinfo.address)
-        })
-        this._forwarder.send(msg)
-      }
-    } catch (err) {
-      console.log('Forwarding error', err)
-    }
-  },
-
-  // Check if forwarder not injected then create a new one
-  start({ forwarder = Forwarder.init() } = {}) {
-    this._forwarder = forwarder
-    const socket = this._socket = createSocket('udp4')
+  start() {
     // For simplicity, load everything into memory!!
     // TODO: finding another approach
-    this._blacklist = fs
-      .readFileSync('adlist/youtube')
-      .toString()
-      .split("\n");
-    const cache = {}
+    // Set.has check is better [].includes
+    this._blacklist = new Set(
+      fs
+        .readFileSync('adlist/youtube')
+        .toString()
+        .split("\n")
+    )
 
+    // Build cache at run time Map is better than {}
+    const cache = new Map()
 
-    forwarder._socket.on('message', (upstreamRes) => {
+    const forwarder = createSocket('udp4')
+    forwarder.on('message', (upstreamRes) => {
 
       // Upstream resId
       const id = upstreamRes.slice(0, 2).toString('base64')
-      const rinfo = cache[id]
+      const rinfo = cache.get(id)
       socket.send(upstreamRes, rinfo.port, rinfo.address)
-      delete cache[id]
+      cache.delete(id)
     })
 
+    const socket = this._socket = createSocket('udp4')
     socket.on('message', async (msg, rinfo) => {
       try {
         const { name, endOffset: questionSectionEndOffset } = this.getQuestionDomain(msg)
         if (this.isDomainBlackListed(name)) {
           socket.send(this.generateResponse(msg, { questionSectionEndOffset }), rinfo.port, rinfo.address)
         } else {
-          // const responseBuf = await this._forwarder.send(msg)
-          // socket.send(responseBuf, rinfo.port, rinfo.address)
-          this._forwarder.send(msg)
+          // TODO: Make upstream configurable
+          forwarder.send(msg, 53, '8.8.8.8')
           const id = msg.slice(0, 2).toString('base64')
-          cache[id] = rinfo
+          cache.set(id, rinfo)
         }
       } catch (err) {
         console.log('Forwarding error', err)
