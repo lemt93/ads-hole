@@ -3,5 +3,11 @@
   "version": "1.0.0",
   "description": "Ads blocking by resolving ads domain name to loopback interface",
   "main": "index.mjs",
-  "license": "MIT"
+  "scripts": {
+    "tsc-watch": "tsc -w"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^4.1.3"
+  }
 }
